@@ -14,3 +14,5 @@ Imports:
     stats,
     graphics,
     grDevices
+URL: https://github.com/daihesui/metapgm
+BugReports: https://github.com/daihesui/metapgm/issues
