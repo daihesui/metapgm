@@ -1,0 +1,16 @@
+Package: metapgm
+Title: Penalized Gaussian Mixture Models for Meta-Analysis
+Version: 0.1.0
+Authors@R: 
+    person("Daihe", "Sui", email = "daihesui2026@u.northwestern.edu", role = c("aut", "cre"))
+Description: Fits penalized Gaussian mixture models for meta-analysis, 
+    including conditional models with meta-regression capabilities.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.2.3
+Imports: 
+    trust,
+    stats,
+    graphics,
+    grDevices
