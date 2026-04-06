@@ -42,6 +42,7 @@ format_newX <- function(newX, p) {
 #' @param alpha_init Optional numeric vector of initial values for the alpha parameters.
 #' @param beta_init Optional numeric vector of initial values for the beta parameters.
 #' @param mu_grid Optional numeric vector of component means.
+#' @param get_ci Logical indicating whether to compute variance-covariance matrices for confidence intervals.
 #' @param ... Additional arguments passed to \code{\link[trust]{trust}}.
 #'
 #' @return An object of class \code{res.pgm}.
@@ -53,7 +54,7 @@ format_newX <- function(newX, p) {
 #' @export
 rma.pgm <- function(y, v, X = NULL, group = NULL, penalty_order = 3, K = 40,
                     lambda_alpha_grid = exp(seq(-5, 5, by = 1)), choose_lambda = "aic",
-                    alpha_init = NULL, beta_init = NULL, mu_grid = NULL, ...) {
+                    alpha_init = NULL, beta_init = NULL, mu_grid = NULL, get_ci = TRUE, ...) {
   if (!(choose_lambda %in% c("aic", "bic"))) stop("choose_lambda must be 'aic' or 'bic'.")
   if (!is.numeric(y) || !is.numeric(v)) stop("'y' and 'v' must be numeric.")
 
@@ -104,10 +105,14 @@ rma.pgm <- function(y, v, X = NULL, group = NULL, penalty_order = 3, K = 40,
 
   if (is.null(best) || is.infinite(best$ic)) stop("Optimization failed for all lambda values.\n")
 
-  if (use_robust) {
-    V_eta <- calc_V_robust(y, v, X, group, mu, tau_c, best$alpha, best$beta, best$Jp_inv, k0)
+  if (get_ci) {
+    if (use_robust) {
+      V_eta <- calc_V_robust(y, v, X, group, mu, tau_c, best$alpha, best$beta, best$Jp_inv, k0)
+    } else {
+      V_eta <- best$Jp_inv %*% best$J %*% best$Jp_inv
+    }
   } else {
-    V_eta <- best$Jp_inv %*% best$J %*% best$Jp_inv
+    V_eta <- NULL
   }
 
   alpha_star <- pad_zero(best$alpha, k0)
@@ -117,7 +122,7 @@ rma.pgm <- function(y, v, X = NULL, group = NULL, penalty_order = 3, K = 40,
   out <- list(
     best_model = list(alpha = best$alpha, beta = best$beta, w = w, V_eta = V_eta, ic = best$ic, edf = best$edf),
     path_data = list(lambda = lambda_alpha_grid, ic = ics, edf = sapply(path_results, function(x) x$edf)),
-    data = list(y = y, X = X, group = group, choose_lambda = choose_lambda, mu = mu, tau_c = tau_c, k0 = k0),
+    data = list(y = y, X = X, group = group, choose_lambda = choose_lambda, mu = mu, tau_c = tau_c, k0 = k0, get_ci = get_ci),
     p = p
   )
   class(out) <- "res.pgm"
@@ -134,22 +139,33 @@ rma.pgm <- function(y, v, X = NULL, group = NULL, penalty_order = 3, K = 40,
 #' @return An object of class \code{summary.res.pgm}.
 #' @export
 summary.res.pgm <- function(object, level = 0.95, less_than = NULL, ...) {
+  get_ci <- isTRUE(object$data$get_ci) || is.null(object$data$get_ci)
   mu <- object$data$mu
   tau_c <- object$data$tau_c
   k0 <- object$data$k0
   K <- length(mu)
   p <- object$p
   w <- object$best_model$w
-  V_alpha <- object$best_model$V_eta[1:(K - 1), 1:(K - 1), drop = FALSE]
+
+  if (get_ci) {
+    V_alpha <- object$best_model$V_eta[1:(K - 1), 1:(K - 1), drop = FALSE]
+  }
   z_crit <- qnorm(1 - (1 - level) / 2)
 
   mu_est <- sum(w * mu)
-  grad_mu <- as.numeric(w * (mu - mu_est))[-k0]
-  var_mu <- as.numeric(crossprod(grad_mu, V_alpha %*% grad_mu))
-  se_mu <- sqrt(max(0, var_mu))
-  zval_mu <- ifelse(se_mu > 0, mu_est / se_mu, NA)
-  pval_mu <- ifelse(!is.na(zval_mu), 2 * (1 - pnorm(abs(zval_mu))), NA)
-  ci_mu <- c(mu_est - z_crit * se_mu, mu_est + z_crit * se_mu)
+  if (get_ci) {
+    grad_mu <- as.numeric(w * (mu - mu_est))[-k0]
+    var_mu <- as.numeric(crossprod(grad_mu, V_alpha %*% grad_mu))
+    se_mu <- sqrt(max(0, var_mu))
+    zval_mu <- ifelse(se_mu > 0, mu_est / se_mu, NA)
+    pval_mu <- ifelse(!is.na(zval_mu), 2 * (1 - pnorm(abs(zval_mu))), NA)
+    ci_mu <- c(mu_est - z_crit * se_mu, mu_est + z_crit * se_mu)
+  } else {
+    se_mu <- NA
+    zval_mu <- NA
+    pval_mu <- NA
+    ci_mu <- c(NA, NA)
+  }
 
   res_mat <- matrix(c(mu_est, se_mu, zval_mu, pval_mu, ci_mu[1], ci_mu[2]), nrow = 1)
   rownames(res_mat) <- "Mean (\u03bc)"
@@ -157,13 +173,21 @@ summary.res.pgm <- function(object, level = 0.95, less_than = NULL, ...) {
   mu2_est <- sum(w * mu^2)
   sigma2_est <- tau_c^2 + mu2_est - mu_est^2
 
-  grad_sigma2 <- as.numeric(w * ((mu^2 - mu2_est) - 2 * mu_est * (mu - mu_est)))[-k0]
-  var_sigma2 <- as.numeric(crossprod(grad_sigma2, V_alpha %*% grad_sigma2))
-  se_sigma2 <- sqrt(max(0, var_sigma2))
-  zval_sigma2 <- ifelse(se_sigma2 > 0, sigma2_est / se_sigma2, NA)
-  pval_sigma2 <- ifelse(!is.na(zval_sigma2), 2 * (1 - pnorm(abs(zval_sigma2))), NA)
-  ci_lb_sigma2 <- max(0, sigma2_est - z_crit * se_sigma2)
-  ci_ub_sigma2 <- sigma2_est + z_crit * se_sigma2
+  if (get_ci) {
+    grad_sigma2 <- as.numeric(w * ((mu^2 - mu2_est) - 2 * mu_est * (mu - mu_est)))[-k0]
+    var_sigma2 <- as.numeric(crossprod(grad_sigma2, V_alpha %*% grad_sigma2))
+    se_sigma2 <- sqrt(max(0, var_sigma2))
+    zval_sigma2 <- ifelse(se_sigma2 > 0, sigma2_est / se_sigma2, NA)
+    pval_sigma2 <- ifelse(!is.na(zval_sigma2), 2 * (1 - pnorm(abs(zval_sigma2))), NA)
+    ci_lb_sigma2 <- max(0, sigma2_est - z_crit * se_sigma2)
+    ci_ub_sigma2 <- sigma2_est + z_crit * se_sigma2
+  } else {
+    se_sigma2 <- NA
+    zval_sigma2 <- NA
+    pval_sigma2 <- NA
+    ci_lb_sigma2 <- NA
+    ci_ub_sigma2 <- NA
+  }
 
   res_mat <- rbind(res_mat, c(sigma2_est, se_sigma2, zval_sigma2, pval_sigma2, ci_lb_sigma2, ci_ub_sigma2))
   rownames(res_mat)[2] <- "Variance (\u03c3\u00b2)"
@@ -172,12 +196,19 @@ summary.res.pgm <- function(object, level = 0.95, less_than = NULL, ...) {
     prob_list <- lapply(less_than, function(val) {
       p_c <- pnorm(val, mean = mu, sd = tau_c)
       prob_val <- sum(w * p_c)
-      grad_p <- ((p_c - prob_val) * w)[-k0]
-      var_p <- as.numeric(crossprod(grad_p, V_alpha %*% grad_p))
-      se_p <- sqrt(max(0, var_p))
-      zval_p <- ifelse(se_p > 0, prob_val / se_p, NA)
-      pval_p <- ifelse(!is.na(zval_p), 2 * (1 - pnorm(abs(zval_p))), NA)
-      ci_p <- c(max(0, prob_val - z_crit * se_p), min(1, prob_val + z_crit * se_p))
+      if (get_ci) {
+        grad_p <- ((p_c - prob_val) * w)[-k0]
+        var_p <- as.numeric(crossprod(grad_p, V_alpha %*% grad_p))
+        se_p <- sqrt(max(0, var_p))
+        zval_p <- ifelse(se_p > 0, prob_val / se_p, NA)
+        pval_p <- ifelse(!is.na(zval_p), 2 * (1 - pnorm(abs(zval_p))), NA)
+        ci_p <- c(max(0, prob_val - z_crit * se_p), min(1, prob_val + z_crit * se_p))
+      } else {
+        se_p <- NA
+        zval_p <- NA
+        pval_p <- NA
+        ci_p <- c(NA, NA)
+      }
       c(prob_val, se_p, zval_p, pval_p, ci_p[1], ci_p[2])
     })
 
@@ -190,13 +221,21 @@ summary.res.pgm <- function(object, level = 0.95, less_than = NULL, ...) {
 
   if (p > 0) {
     beta_est <- object$best_model$beta
-    idx_beta <- (K):(K - 1 + p)
-    V_beta <- object$best_model$V_eta[idx_beta, idx_beta, drop = FALSE]
-    se_beta <- sqrt(pmax(0, diag(V_beta)))
-    zval_beta <- ifelse(se_beta > 0, beta_est / se_beta, NA)
-    pval_beta <- ifelse(!is.na(zval_beta), 2 * (1 - pnorm(abs(zval_beta))), NA)
-    ci_lb_beta <- beta_est - z_crit * se_beta
-    ci_ub_beta <- beta_est + z_crit * se_beta
+    if (get_ci) {
+      idx_beta <- (K):(K - 1 + p)
+      V_beta <- object$best_model$V_eta[idx_beta, idx_beta, drop = FALSE]
+      se_beta <- sqrt(pmax(0, diag(V_beta)))
+      zval_beta <- ifelse(se_beta > 0, beta_est / se_beta, NA)
+      pval_beta <- ifelse(!is.na(zval_beta), 2 * (1 - pnorm(abs(zval_beta))), NA)
+      ci_lb_beta <- beta_est - z_crit * se_beta
+      ci_ub_beta <- beta_est + z_crit * se_beta
+    } else {
+      se_beta <- rep(NA, p)
+      zval_beta <- rep(NA, p)
+      pval_beta <- rep(NA, p)
+      ci_lb_beta <- rep(NA, p)
+      ci_ub_beta <- rep(NA, p)
+    }
     beta_mat <- cbind(beta_est, se_beta, zval_beta, pval_beta, ci_lb_beta, ci_ub_beta)
     rownames(beta_mat) <- colnames(object$data$X)
     colnames(beta_mat) <- c("estimate", "se", "zval", "pval", "ci.lb", "ci.ub")
@@ -310,6 +349,9 @@ predict.res.pgm <- function(object, level = 0.95, newX = NULL, digits = 4, ...) 
 #' @param ... Additional graphic arguments.
 #' @export
 plot.res.pgm <- function(x, level = 0.95, newX = NULL, add_hist = FALSE, show_ci = FALSE, ...) {
+  get_ci <- isTRUE(x$data$get_ci) || is.null(x$data$get_ci)
+  if (!get_ci) show_ci <- FALSE
+
   mu <- x$data$mu
   tau_c <- x$data$tau_c
   k0 <- x$data$k0
@@ -320,8 +362,12 @@ plot.res.pgm <- function(x, level = 0.95, newX = NULL, add_hist = FALSE, show_ci
   shifts <- if (p > 0) as.numeric(newX %*% x$best_model$beta) else c(0)
 
   w <- x$best_model$w
-  V_eta <- x$best_model$V_eta
-  V_alpha <- V_eta[1:(K - 1), 1:(K - 1), drop = FALSE]
+
+  if (get_ci) {
+    V_eta <- x$best_model$V_eta
+    V_alpha <- V_eta[1:(K - 1), 1:(K - 1), drop = FALSE]
+  }
+
   z_crit <- qnorm(1 - (1 - level) / 2)
   cb_palette <- c("#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
   colors <- rep(cb_palette, length.out = length(shifts))
@@ -346,7 +392,7 @@ plot.res.pgm <- function(x, level = 0.95, newX = NULL, add_hist = FALSE, show_ci
     y_pgm_lower <- NULL
     y_pgm_upper <- NULL
 
-    if (show_ci) {
+    if (show_ci && get_ci) {
       grad_f_alpha <- ((Phi_grid - pdf_vals) * rep(w, each = n_grid))[, -k0, drop = FALSE]
       if (p > 0) {
         R_mat_grid <- (x_grid - rep(mu_shifted, each = n_grid)) / (tau_c^2)
@@ -386,7 +432,7 @@ plot.res.pgm <- function(x, level = 0.95, newX = NULL, add_hist = FALSE, show_ci
   if (add_hist) rect(h$breaks[-length(h$breaks)], 0, h$breaks[-1], h$density, col = "gray92", border = "gray75", lwd = 1)
 
   for (k in seq_along(shifts)) {
-    if (show_ci) {
+    if (show_ci && get_ci) {
       polygon(c(plot_data[[k]]$x, rev(plot_data[[k]]$x)), c(plot_data[[k]]$lower, rev(plot_data[[k]]$upper)), col = adjustcolor(colors[k], alpha.f = 0.2), border = NA)
     }
     lines(plot_data[[k]]$x, plot_data[[k]]$pdf, lwd = 2, col = colors[k])
@@ -442,6 +488,7 @@ diagplot.res.pgm <- function(x, ...) {
 #' @param alpha_init Optional numeric vector of initial values for alpha parameters.
 #' @param gamma_init Optional numeric vector of initial values for gamma parameters.
 #' @param mu_grid Optional numeric vector of component means.
+#' @param get_ci Logical indicating whether to compute variance-covariance matrices for confidence intervals.
 #' @param ... Additional arguments passed to \code{\link[trust]{trust}}.
 #'
 #' @return An object of class \code{res.pgm.cond}.
@@ -449,7 +496,7 @@ diagplot.res.pgm <- function(x, ...) {
 rma.pgm.cond <- function(y, v, z, group = NULL, penalty_order = 3, K = 40,
                          lambda_alpha_grid = exp(seq(-5, 5, by = 1)),
                          lambda_gamma_grid = exp(seq(-5, 5, by = 1)),
-                         choose_lambda = "aic", alpha_init = NULL, gamma_init = NULL, mu_grid = NULL, ...) {
+                         choose_lambda = "aic", alpha_init = NULL, gamma_init = NULL, mu_grid = NULL, get_ci = TRUE, ...) {
   if (!(choose_lambda %in% c("aic", "bic"))) stop("choose_lambda must be 'aic' or 'bic'.")
   if (!is.numeric(y) || !is.numeric(v)) stop("'y' and 'v' must be numeric.")
 
@@ -489,10 +536,14 @@ rma.pgm.cond <- function(y, v, z, group = NULL, penalty_order = 3, K = 40,
 
   if (is.null(best) || is.infinite(best$ic)) stop("Optimization failed for all lambda combinations.\n")
 
-  if (use_robust) {
-    V_eta <- calc_V_cond_robust(y, v, z, group, mu, tau_c, best$alpha, best$gamma, best$Jp_inv, k0)
+  if (get_ci) {
+    if (use_robust) {
+      V_eta <- calc_V_cond_robust(y, v, z, group, mu, tau_c, best$alpha, best$gamma, best$Jp_inv, k0)
+    } else {
+      V_eta <- best$Jp_inv %*% best$J %*% best$Jp_inv
+    }
   } else {
-    V_eta <- best$Jp_inv %*% best$J %*% best$Jp_inv
+    V_eta <- NULL
   }
 
   out <- list(
@@ -503,7 +554,7 @@ rma.pgm.cond <- function(y, v, z, group = NULL, penalty_order = 3, K = 40,
       ic = ics,
       edf = sapply(path_results, function(x) x$edf)
     ),
-    data = list(y = y, group = group, choose_lambda = choose_lambda, mu = mu, tau_c = tau_c, k0 = k0)
+    data = list(y = y, group = group, choose_lambda = choose_lambda, mu = mu, tau_c = tau_c, k0 = k0, get_ci = get_ci)
   )
   class(out) <- "res.pgm.cond"
 
@@ -521,10 +572,14 @@ rma.pgm.cond <- function(y, v, z, group = NULL, penalty_order = 3, K = 40,
 #' @return An object of class \code{summary.res.pgm.cond}.
 #' @export
 summary.res.pgm.cond <- function(object, level = 0.95, less_than = NULL, newz = NULL, compare = NULL, ...) {
+  get_ci <- isTRUE(object$data$get_ci) || is.null(object$data$get_ci)
   mu <- object$data$mu
   tau_c <- object$data$tau_c
   k0 <- object$data$k0
-  V_eta <- object$best_model$V_eta
+
+  if (get_ci) {
+    V_eta <- object$best_model$V_eta
+  }
   z_crit <- qnorm(1 - (1 - level) / 2)
 
   alpha_star <- pad_zero(object$best_model$alpha, k0)
@@ -539,15 +594,23 @@ summary.res.pgm.cond <- function(object, level = 0.95, less_than = NULL, newz = 
     w <- exp(eta_z - max_eta_z) / sum(exp(eta_z - max_eta_z))
 
     mu_est <- sum(w * mu)
-    J_w <- diag(w) - tcrossprod(w)
-    J_mu_alpha <- as.numeric(crossprod(J_w, mu))[-k0]
-    J_mu_gamma <- z_val * J_mu_alpha
-    grad_mu <- c(J_mu_alpha, J_mu_gamma)
-    var_mu <- as.numeric(crossprod(grad_mu, V_eta %*% grad_mu))
-    se_mu <- sqrt(max(0, var_mu))
-    zval_mu <- ifelse(se_mu > 0, mu_est / se_mu, NA)
-    pval_mu <- ifelse(!is.na(zval_mu), 2 * (1 - pnorm(abs(zval_mu))), NA)
-    ci_mu <- c(mu_est - z_crit * se_mu, mu_est + z_crit * se_mu)
+
+    if (get_ci) {
+      J_w <- diag(w) - tcrossprod(w)
+      J_mu_alpha <- as.numeric(crossprod(J_w, mu))[-k0]
+      J_mu_gamma <- z_val * J_mu_alpha
+      grad_mu <- c(J_mu_alpha, J_mu_gamma)
+      var_mu <- as.numeric(crossprod(grad_mu, V_eta %*% grad_mu))
+      se_mu <- sqrt(max(0, var_mu))
+      zval_mu <- ifelse(se_mu > 0, mu_est / se_mu, NA)
+      pval_mu <- ifelse(!is.na(zval_mu), 2 * (1 - pnorm(abs(zval_mu))), NA)
+      ci_mu <- c(mu_est - z_crit * se_mu, mu_est + z_crit * se_mu)
+    } else {
+      se_mu <- NA
+      zval_mu <- NA
+      pval_mu <- NA
+      ci_mu <- c(NA, NA)
+    }
 
     res_mat <- matrix(c(mu_est, se_mu, zval_mu, pval_mu, ci_mu[1], ci_mu[2]), nrow = 1)
     rownames(res_mat) <- "Mean (\u03bc)"
@@ -555,17 +618,25 @@ summary.res.pgm.cond <- function(object, level = 0.95, less_than = NULL, newz = 
     mu2_est <- sum(w * mu^2)
     sigma2_est <- tau_c^2 + mu2_est - mu_est^2
 
-    J_mu2_alpha <- as.numeric(crossprod(J_w, mu^2))[-k0]
-    J_sigma2_alpha <- J_mu2_alpha - 2 * mu_est * J_mu_alpha
-    J_sigma2_gamma <- z_val * J_sigma2_alpha
+    if (get_ci) {
+      J_mu2_alpha <- as.numeric(crossprod(J_w, mu^2))[-k0]
+      J_sigma2_alpha <- J_mu2_alpha - 2 * mu_est * J_mu_alpha
+      J_sigma2_gamma <- z_val * J_sigma2_alpha
 
-    grad_sigma2 <- c(J_sigma2_alpha, J_sigma2_gamma)
-    var_sigma2 <- as.numeric(crossprod(grad_sigma2, V_eta %*% grad_sigma2))
-    se_sigma2 <- sqrt(max(0, var_sigma2))
-    zval_sigma2 <- ifelse(se_sigma2 > 0, sigma2_est / se_sigma2, NA)
-    pval_sigma2 <- ifelse(!is.na(zval_sigma2), 2 * (1 - pnorm(abs(zval_sigma2))), NA)
-    ci_lb_sigma2 <- max(0, sigma2_est - z_crit * se_sigma2)
-    ci_ub_sigma2 <- sigma2_est + z_crit * se_sigma2
+      grad_sigma2 <- c(J_sigma2_alpha, J_sigma2_gamma)
+      var_sigma2 <- as.numeric(crossprod(grad_sigma2, V_eta %*% grad_sigma2))
+      se_sigma2 <- sqrt(max(0, var_sigma2))
+      zval_sigma2 <- ifelse(se_sigma2 > 0, sigma2_est / se_sigma2, NA)
+      pval_sigma2 <- ifelse(!is.na(zval_sigma2), 2 * (1 - pnorm(abs(zval_sigma2))), NA)
+      ci_lb_sigma2 <- max(0, sigma2_est - z_crit * se_sigma2)
+      ci_ub_sigma2 <- sigma2_est + z_crit * se_sigma2
+    } else {
+      se_sigma2 <- NA
+      zval_sigma2 <- NA
+      pval_sigma2 <- NA
+      ci_lb_sigma2 <- NA
+      ci_ub_sigma2 <- NA
+    }
 
     res_mat <- rbind(res_mat, c(sigma2_est, se_sigma2, zval_sigma2, pval_sigma2, ci_lb_sigma2, ci_ub_sigma2))
     rownames(res_mat)[2] <- "Variance (\u03c3\u00b2)"
@@ -574,14 +645,21 @@ summary.res.pgm.cond <- function(object, level = 0.95, less_than = NULL, newz = 
       prob_list <- lapply(less_than, function(val) {
         p_c <- pnorm(val, mean = mu, sd = tau_c)
         prob_val <- sum(w * p_c)
-        J_p_alpha <- as.numeric(crossprod(J_w, p_c))[-k0]
-        J_p_gamma <- z_val * J_p_alpha
-        grad_p <- c(J_p_alpha, J_p_gamma)
-        var_p <- as.numeric(crossprod(grad_p, V_eta %*% grad_p))
-        se_p <- sqrt(max(0, var_p))
-        zval_p <- ifelse(se_p > 0, prob_val / se_p, NA)
-        pval_p <- ifelse(!is.na(zval_p), 2 * (1 - pnorm(abs(zval_p))), NA)
-        ci_p <- c(max(0, prob_val - z_crit * se_p), min(1, prob_val + z_crit * se_p))
+        if (get_ci) {
+          J_p_alpha <- as.numeric(crossprod(J_w, p_c))[-k0]
+          J_p_gamma <- z_val * J_p_alpha
+          grad_p <- c(J_p_alpha, J_p_gamma)
+          var_p <- as.numeric(crossprod(grad_p, V_eta %*% grad_p))
+          se_p <- sqrt(max(0, var_p))
+          zval_p <- ifelse(se_p > 0, prob_val / se_p, NA)
+          pval_p <- ifelse(!is.na(zval_p), 2 * (1 - pnorm(abs(zval_p))), NA)
+          ci_p <- c(max(0, prob_val - z_crit * se_p), min(1, prob_val + z_crit * se_p))
+        } else {
+          se_p <- NA
+          zval_p <- NA
+          pval_p <- NA
+          ci_p <- c(NA, NA)
+        }
         c(prob_val, se_p, zval_p, pval_p, ci_p[1], ci_p[2])
       })
       prob_stats <- do.call(rbind, prob_list)
@@ -607,52 +685,69 @@ summary.res.pgm.cond <- function(object, level = 0.95, less_than = NULL, newz = 
 
       eta_z1 <- alpha_star + gamma_star * z1
       w_z1 <- exp(eta_z1 - max(eta_z1)) / sum(exp(eta_z1 - max(eta_z1)))
-      J_w1 <- diag(w_z1) - tcrossprod(w_z1)
 
       eta_z2 <- alpha_star + gamma_star * z2
       w_z2 <- exp(eta_z2 - max(eta_z2)) / sum(exp(eta_z2 - max(eta_z2)))
-      J_w2 <- diag(w_z2) - tcrossprod(w_z2)
 
       mu_diff <- sum(w_z2 * mu) - sum(w_z1 * mu)
 
-      J_mu_alpha1 <- as.numeric(crossprod(J_w1, mu))[-k0]
-      grad_mu1 <- c(J_mu_alpha1, z1 * J_mu_alpha1)
+      if (get_ci) {
+        J_w1 <- diag(w_z1) - tcrossprod(w_z1)
+        J_w2 <- diag(w_z2) - tcrossprod(w_z2)
 
-      J_mu_alpha2 <- as.numeric(crossprod(J_w2, mu))[-k0]
-      grad_mu2 <- c(J_mu_alpha2, z2 * J_mu_alpha2)
+        J_mu_alpha1 <- as.numeric(crossprod(J_w1, mu))[-k0]
+        grad_mu1 <- c(J_mu_alpha1, z1 * J_mu_alpha1)
 
-      grad_mu_diff <- grad_mu2 - grad_mu1
-      var_mu_diff <- as.numeric(crossprod(grad_mu_diff, V_eta %*% grad_mu_diff))
+        J_mu_alpha2 <- as.numeric(crossprod(J_w2, mu))[-k0]
+        grad_mu2 <- c(J_mu_alpha2, z2 * J_mu_alpha2)
 
-      se_mu_diff <- sqrt(max(0, var_mu_diff))
-      zval_mu_diff <- ifelse(se_mu_diff > 0, mu_diff / se_mu_diff, NA)
-      pval_mu_diff <- ifelse(!is.na(zval_mu_diff), 2 * (1 - pnorm(abs(zval_mu_diff))), NA)
-      ci_mu_diff <- c(mu_diff - z_crit * se_mu_diff, mu_diff + z_crit * se_mu_diff)
+        grad_mu_diff <- grad_mu2 - grad_mu1
+        var_mu_diff <- as.numeric(crossprod(grad_mu_diff, V_eta %*% grad_mu_diff))
+
+        se_mu_diff <- sqrt(max(0, var_mu_diff))
+        zval_mu_diff <- ifelse(se_mu_diff > 0, mu_diff / se_mu_diff, NA)
+        pval_mu_diff <- ifelse(!is.na(zval_mu_diff), 2 * (1 - pnorm(abs(zval_mu_diff))), NA)
+        ci_mu_diff <- c(mu_diff - z_crit * se_mu_diff, mu_diff + z_crit * se_mu_diff)
+      } else {
+        se_mu_diff <- NA
+        zval_mu_diff <- NA
+        pval_mu_diff <- NA
+        ci_mu_diff <- c(NA, NA)
+      }
 
       res_mat_diff <- matrix(c(mu_diff, se_mu_diff, zval_mu_diff, pval_mu_diff, ci_mu_diff[1], ci_mu_diff[2]), nrow = 1)
       rownames(res_mat_diff) <- "Mean Diff (\u03bc)"
 
       mu2_z1 <- sum(w_z1 * mu^2)
       sigma2_z1 <- tau_c^2 + mu2_z1 - sum(w_z1 * mu)^2
-      J_mu2_alpha1 <- as.numeric(crossprod(J_w1, mu^2))[-k0]
-      J_sigma2_alpha1 <- J_mu2_alpha1 - 2 * sum(w_z1 * mu) * J_mu_alpha1
-      grad_sigma2_1 <- c(J_sigma2_alpha1, z1 * J_sigma2_alpha1)
-
       mu2_z2 <- sum(w_z2 * mu^2)
       sigma2_z2 <- tau_c^2 + mu2_z2 - sum(w_z2 * mu)^2
-      J_mu2_alpha2 <- as.numeric(crossprod(J_w2, mu^2))[-k0]
-      J_sigma2_alpha2 <- J_mu2_alpha2 - 2 * sum(w_z2 * mu) * J_mu_alpha2
-      grad_sigma2_2 <- c(J_sigma2_alpha2, z2 * J_sigma2_alpha2)
-
       sigma2_diff <- sigma2_z2 - sigma2_z1
-      grad_sigma2_diff <- grad_sigma2_2 - grad_sigma2_1
-      var_sigma2_diff <- as.numeric(crossprod(grad_sigma2_diff, V_eta %*% grad_sigma2_diff))
 
-      se_sigma2_diff <- sqrt(max(0, var_sigma2_diff))
-      zval_sigma2_diff <- ifelse(se_sigma2_diff > 0, sigma2_diff / se_sigma2_diff, NA)
-      pval_sigma2_diff <- ifelse(!is.na(zval_sigma2_diff), 2 * (1 - pnorm(abs(zval_sigma2_diff))), NA)
-      ci_lb_sigma2_diff <- sigma2_diff - z_crit * se_sigma2_diff
-      ci_ub_sigma2_diff <- sigma2_diff + z_crit * se_sigma2_diff
+      if (get_ci) {
+        J_mu2_alpha1 <- as.numeric(crossprod(J_w1, mu^2))[-k0]
+        J_sigma2_alpha1 <- J_mu2_alpha1 - 2 * sum(w_z1 * mu) * J_mu_alpha1
+        grad_sigma2_1 <- c(J_sigma2_alpha1, z1 * J_sigma2_alpha1)
+
+        J_mu2_alpha2 <- as.numeric(crossprod(J_w2, mu^2))[-k0]
+        J_sigma2_alpha2 <- J_mu2_alpha2 - 2 * sum(w_z2 * mu) * J_mu_alpha2
+        grad_sigma2_2 <- c(J_sigma2_alpha2, z2 * J_sigma2_alpha2)
+
+        grad_sigma2_diff <- grad_sigma2_2 - grad_sigma2_1
+        var_sigma2_diff <- as.numeric(crossprod(grad_sigma2_diff, V_eta %*% grad_sigma2_diff))
+
+        se_sigma2_diff <- sqrt(max(0, var_sigma2_diff))
+        zval_sigma2_diff <- ifelse(se_sigma2_diff > 0, sigma2_diff / se_sigma2_diff, NA)
+        pval_sigma2_diff <- ifelse(!is.na(zval_sigma2_diff), 2 * (1 - pnorm(abs(zval_sigma2_diff))), NA)
+        ci_lb_sigma2_diff <- sigma2_diff - z_crit * se_sigma2_diff
+        ci_ub_sigma2_diff <- sigma2_diff + z_crit * se_sigma2_diff
+      } else {
+        se_sigma2_diff <- NA
+        zval_sigma2_diff <- NA
+        pval_sigma2_diff <- NA
+        ci_lb_sigma2_diff <- NA
+        ci_ub_sigma2_diff <- NA
+      }
 
       res_mat_diff <- rbind(res_mat_diff, c(sigma2_diff, se_sigma2_diff, zval_sigma2_diff, pval_sigma2_diff, ci_lb_sigma2_diff, ci_ub_sigma2_diff))
       rownames(res_mat_diff)[2] <- "\u0394 Variance (\u03c3\u00b2)"
@@ -664,19 +759,26 @@ summary.res.pgm.cond <- function(object, level = 0.95, less_than = NULL, newz = 
           prob_val2 <- sum(w_z2 * p_c)
           prob_diff <- prob_val2 - prob_val1
 
-          J_p_alpha1 <- as.numeric(crossprod(J_w1, p_c))[-k0]
-          grad_p1 <- c(J_p_alpha1, z1 * J_p_alpha1)
+          if (get_ci) {
+            J_p_alpha1 <- as.numeric(crossprod(J_w1, p_c))[-k0]
+            grad_p1 <- c(J_p_alpha1, z1 * J_p_alpha1)
 
-          J_p_alpha2 <- as.numeric(crossprod(J_w2, p_c))[-k0]
-          grad_p2 <- c(J_p_alpha2, z2 * J_p_alpha2)
+            J_p_alpha2 <- as.numeric(crossprod(J_w2, p_c))[-k0]
+            grad_p2 <- c(J_p_alpha2, z2 * J_p_alpha2)
 
-          grad_p_diff <- grad_p2 - grad_p1
-          var_p_diff <- as.numeric(crossprod(grad_p_diff, V_eta %*% grad_p_diff))
+            grad_p_diff <- grad_p2 - grad_p1
+            var_p_diff <- as.numeric(crossprod(grad_p_diff, V_eta %*% grad_p_diff))
 
-          se_p_diff <- sqrt(max(0, var_p_diff))
-          zval_p_diff <- ifelse(se_p_diff > 0, prob_diff / se_p_diff, NA)
-          pval_p_diff <- ifelse(!is.na(zval_p_diff), 2 * (1 - pnorm(abs(zval_p_diff))), NA)
-          ci_p_diff <- c(prob_diff - z_crit * se_p_diff, prob_diff + z_crit * se_p_diff)
+            se_p_diff <- sqrt(max(0, var_p_diff))
+            zval_p_diff <- ifelse(se_p_diff > 0, prob_diff / se_p_diff, NA)
+            pval_p_diff <- ifelse(!is.na(zval_p_diff), 2 * (1 - pnorm(abs(zval_p_diff))), NA)
+            ci_p_diff <- c(prob_diff - z_crit * se_p_diff, prob_diff + z_crit * se_p_diff)
+          } else {
+            se_p_diff <- NA
+            zval_p_diff <- NA
+            pval_p_diff <- NA
+            ci_p_diff <- c(NA, NA)
+          }
 
           c(prob_diff, se_p_diff, zval_p_diff, pval_p_diff, ci_p_diff[1], ci_p_diff[2])
         })
@@ -781,11 +883,18 @@ predict.res.pgm.cond <- function(object, level = 0.95, newz = NULL, digits = 4, 
 #' @param ... Additional graphic arguments.
 #' @export
 plot.res.pgm.cond <- function(x, level = 0.95, newz = NULL, add_hist = FALSE, show_ci = FALSE, ...) {
+  get_ci <- isTRUE(x$data$get_ci) || is.null(x$data$get_ci)
+  if (!get_ci) show_ci <- FALSE
+
   mu <- x$data$mu
   tau_c <- x$data$tau_c
   k0 <- x$data$k0
   K <- length(mu)
-  V_eta <- x$best_model$V_eta
+
+  if (get_ci) {
+    V_eta <- x$best_model$V_eta
+  }
+
   z_crit <- qnorm(1 - (1 - level) / 2)
 
   alpha_star <- pad_zero(x$best_model$alpha, k0)
@@ -812,7 +921,7 @@ plot.res.pgm.cond <- function(x, level = 0.95, newz = NULL, add_hist = FALSE, sh
     y_lower <- NULL
     y_upper <- NULL
 
-    if (show_ci) {
+    if (show_ci && get_ci) {
       J_w <- diag(w) - tcrossprod(w)
       grad_f_alpha <- (Phi_grid %*% J_w)[, -k0, drop = FALSE]
       grad_f_gamma <- z_val * grad_f_alpha
@@ -848,7 +957,7 @@ plot.res.pgm.cond <- function(x, level = 0.95, newz = NULL, add_hist = FALSE, sh
   if (add_hist) rect(h$breaks[-length(h$breaks)], 0, h$breaks[-1], h$density, col = "gray92", border = "gray75", lwd = 1)
 
   for (k in seq_along(newz_vals)) {
-    if (show_ci) {
+    if (show_ci && get_ci) {
       polygon(c(x_grid, rev(x_grid)), c(plot_data[[k]]$lower, rev(plot_data[[k]]$upper)), col = adjustcolor(colors[k], alpha.f = 0.2), border = NA)
     }
     lines(x_grid, plot_data[[k]]$pdf, lwd = 2, col = colors[k])

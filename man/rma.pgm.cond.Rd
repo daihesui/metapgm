@@ -17,6 +17,7 @@ rma.pgm.cond(
   alpha_init = NULL,
   gamma_init = NULL,
   mu_grid = NULL,
+  get_ci = TRUE,
   ...
 )
 }
@@ -44,6 +45,8 @@ rma.pgm.cond(
 \item{gamma_init}{Optional numeric vector of initial values for gamma parameters.}
 
 \item{mu_grid}{Optional numeric vector of component means.}
+
+\item{get_ci}{Logical indicating whether to compute variance-covariance matrices for confidence intervals.}
 
 \item{...}{Additional arguments passed to \code{\link[trust]{trust}}.}
 }

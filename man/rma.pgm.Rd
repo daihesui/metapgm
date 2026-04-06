@@ -16,6 +16,7 @@ rma.pgm(
   alpha_init = NULL,
   beta_init = NULL,
   mu_grid = NULL,
+  get_ci = TRUE,
   ...
 )
 }
@@ -41,6 +42,8 @@ rma.pgm(
 \item{beta_init}{Optional numeric vector of initial values for the beta parameters.}
 
 \item{mu_grid}{Optional numeric vector of component means.}
+
+\item{get_ci}{Logical indicating whether to compute variance-covariance matrices for confidence intervals.}
 
 \item{...}{Additional arguments passed to \code{\link[trust]{trust}}.}
 }
