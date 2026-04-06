@@ -10,7 +10,7 @@ rma.pgm(
   X = NULL,
   group = NULL,
   penalty_order = 3,
-  K = 40,
+  K = 30,
   lambda_alpha_grid = exp(seq(-5, 5, by = 1)),
   choose_lambda = "aic",
   alpha_init = NULL,

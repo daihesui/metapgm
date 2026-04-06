@@ -52,7 +52,7 @@ format_newX <- function(newX, p) {
 #' @importFrom graphics abline axis contour image legend lines points polygon rect par plot hist
 #' @importFrom grDevices adjustcolor hcl.colors
 #' @export
-rma.pgm <- function(y, v, X = NULL, group = NULL, penalty_order = 3, K = 40,
+rma.pgm <- function(y, v, X = NULL, group = NULL, penalty_order = 3, K = 30,
                     lambda_alpha_grid = exp(seq(-5, 5, by = 1)), choose_lambda = "aic",
                     alpha_init = NULL, beta_init = NULL, mu_grid = NULL, get_ci = TRUE, ...) {
   if (!(choose_lambda %in% c("aic", "bic"))) stop("choose_lambda must be 'aic' or 'bic'.")
@@ -493,7 +493,7 @@ diagplot.res.pgm <- function(x, ...) {
 #'
 #' @return An object of class \code{res.pgm.cond}.
 #' @export
-rma.pgm.cond <- function(y, v, z, group = NULL, penalty_order = 3, K = 40,
+rma.pgm.cond <- function(y, v, z, group = NULL, penalty_order = 3, K = 30,
                          lambda_alpha_grid = exp(seq(-5, 5, by = 1)),
                          lambda_gamma_grid = exp(seq(-5, 5, by = 1)),
                          choose_lambda = "aic", alpha_init = NULL, gamma_init = NULL, mu_grid = NULL, get_ci = TRUE, ...) {
