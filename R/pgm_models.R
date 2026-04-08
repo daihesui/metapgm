@@ -414,8 +414,6 @@ plot.res.pgm <- function(x, level = 0.95, newX = NULL, add_hist = FALSE, show_ci
   }
 
   y <- x$data$y
-  old_par <- par(no.readonly = TRUE)
-  on.exit(par(old_par))
   par(mfrow = c(1, 1), mar = c(5, 5, 2, 2), cex.axis = 1, cex.lab = 1.1)
 
   if (add_hist) {
@@ -939,8 +937,6 @@ plot.res.pgm.cond <- function(x, level = 0.95, newz = NULL, add_hist = FALSE, sh
   }
 
   y <- x$data$y
-  old_par <- par(no.readonly = TRUE)
-  on.exit(par(old_par))
   par(mfrow = c(1, 1), mar = c(5, 5, 2, 2), cex.axis = 1, cex.lab = 1.1)
 
   if (add_hist) {
