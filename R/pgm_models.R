@@ -491,7 +491,7 @@ diagplot.res.pgm <- function(x, ...) {
 #'
 #' @return An object of class \code{res.pgm.cond}.
 #' @export
-rma.pgm.cond <- function(y, v, z, group = NULL, penalty_order = 3, K = 30,
+rma.pgm.cond <- function(y, v, z, group = NULL, penalty_order = 3, K = 10,
                          lambda_alpha_grid = exp(seq(-5, 5, by = 1)),
                          lambda_gamma_grid = exp(seq(-5, 5, by = 1)),
                          choose_lambda = "aic", alpha_init = NULL, gamma_init = NULL, mu_grid = NULL, get_ci = TRUE, ...) {

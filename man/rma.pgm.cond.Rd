@@ -10,7 +10,7 @@ rma.pgm.cond(
   z,
   group = NULL,
   penalty_order = 3,
-  K = 30,
+  K = 10,
   lambda_alpha_grid = exp(seq(-5, 5, by = 1)),
   lambda_gamma_grid = exp(seq(-5, 5, by = 1)),
   choose_lambda = "aic",
