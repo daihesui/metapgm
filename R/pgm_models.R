@@ -371,6 +371,7 @@ plot.res.pgm <- function(x, level = 0.95, newX = NULL, add_hist = FALSE, show_ci
   z_crit <- qnorm(1 - (1 - level) / 2)
   cb_palette <- c("#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
   colors <- rep(cb_palette, length.out = length(shifts))
+  linetypes <- rep(1:6, length.out = length(shifts))
 
   plot_data <- list()
   global_x_min <- Inf
@@ -433,14 +434,14 @@ plot.res.pgm <- function(x, level = 0.95, newX = NULL, add_hist = FALSE, show_ci
     if (show_ci && get_ci) {
       polygon(c(plot_data[[k]]$x, rev(plot_data[[k]]$x)), c(plot_data[[k]]$lower, rev(plot_data[[k]]$upper)), col = adjustcolor(colors[k], alpha.f = 0.2), border = NA)
     }
-    lines(plot_data[[k]]$x, plot_data[[k]]$pdf, lwd = 2, col = colors[k])
+    lines(plot_data[[k]]$x, plot_data[[k]]$pdf, lwd = 2, col = colors[k], lty = linetypes[k])
   }
 
   if (p > 0) {
     legend_labels <- apply(newX, 1, function(row) {
       if (p == 1) paste0("X = ", round(row[1], 4)) else paste0("X = (", paste(round(row, 4), collapse = ", "), ")")
     })
-    legend("topright", legend = legend_labels, col = colors[1:length(shifts)], lwd = 2, bty = "n")
+    legend("topright", legend = legend_labels, col = colors[1:length(shifts)], lty = linetypes[1:length(shifts)], lwd = 2, bty = "n")
   }
 }
 
@@ -901,6 +902,7 @@ plot.res.pgm.cond <- function(x, level = 0.95, newz = NULL, add_hist = FALSE, sh
   newz_vals <- if (is.null(newz)) 0 else as.numeric(newz)
   cb_palette <- c("#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
   colors <- rep(cb_palette, length.out = length(newz_vals))
+  linetypes <- rep(1:6, length.out = length(newz_vals))
 
   plot_data <- list()
   global_y_max <- -Inf
@@ -956,11 +958,11 @@ plot.res.pgm.cond <- function(x, level = 0.95, newz = NULL, add_hist = FALSE, sh
     if (show_ci && get_ci) {
       polygon(c(x_grid, rev(x_grid)), c(plot_data[[k]]$lower, rev(plot_data[[k]]$upper)), col = adjustcolor(colors[k], alpha.f = 0.2), border = NA)
     }
-    lines(x_grid, plot_data[[k]]$pdf, lwd = 2, col = colors[k])
+    lines(x_grid, plot_data[[k]]$pdf, lwd = 2, col = colors[k], lty = linetypes[k])
   }
 
   legend_labels <- paste("z =", newz_vals)
-  legend("topright", legend = legend_labels, col = colors[1:length(newz_vals)], lwd = 2, bty = "n")
+  legend("topright", legend = legend_labels, col = colors[1:length(newz_vals)], lty = linetypes[1:length(newz_vals)], lwd = 2, bty = "n")
 }
 
 #' Diagnostic Plots for Conditional PGM Model
